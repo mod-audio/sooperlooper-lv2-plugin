@@ -18,7 +18,10 @@ CXX ?= g++
 
 # flags
 CXXFLAGS += -I. -O3 -Wall -fPIC -DPIC -c -DSAMPLE_MEMORY=$(SAMPLE_MEMORY)
-LDFLAGS += -shared -lm -Wl,--no-undefined
+LDFLAGS += -shared -lm
+ifneq ($(MACOS),true)
+LDFLAGS += -Wl,--no-undefined
+endif
 
 # remove command
 RM = rm -f

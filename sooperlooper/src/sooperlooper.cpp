@@ -30,11 +30,15 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <values.h>
 #include <string.h>
 #include <math.h>
 #include <lv2.h>
 #include <string.h>
+#if defined(__APPLE__) || defined(_WIN32)
+#define MAXLONG (sizeof(long)-1U)
+#else
+#include <values.h>
+#endif
 
 #define PLUGIN_URI "http://moddevices.com/plugins/sooperlooper"
 
