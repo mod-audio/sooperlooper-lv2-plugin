@@ -7,11 +7,8 @@ SAMPLE_MEMORY = 200
 PLUGIN = $(shell basename $(shell pwd) | tr A-Z a-z)
 PLUGIN_SO = $(PLUGIN).so
 
-# installation path
-ifndef INSTALL_PATH
-INSTALL_PATH = /usr/local/lib/lv2/
-endif
-INSTALLATION_PATH = $(DESTDIR)$(INSTALL_PATH)/$(PLUGIN).lv2/
+# installation prefix
+PREFIX ?= /usr/local
 
 # compiler and linker
 CXX ?= g++
@@ -40,6 +37,5 @@ clean:
 	$(RM) src/*.o $(PLUGIN_SO)
 
 install: $(PLUGIN_SO)
-	mkdir -p $(INSTALLATION_PATH)
-	cp $(PLUGIN_SO) $(INSTALLATION_PATH)
-	cp -r src/*.ttl src/modgui $(INSTALLATION_PATH)
+	install -d $(DESTDIR)$(PREFIX)/lib/lv2/$(PLUGIN).lv2/
+	install -m 644 $(PLUGIN_SO) $(DESTDIR)$(PREFIX)/lib/lv2/$(PLUGIN).lv2/
