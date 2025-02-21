@@ -32,7 +32,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
-#include <lv2.h>
+#include <lv2/core/lv2.h>
 #include <string.h>
 #if defined(__APPLE__) || defined(_WIN32)
 #define MAXLONG (sizeof(long)-1U)
@@ -46,7 +46,7 @@
 
 enum {IN_0, IN_1, OUT_0, OUT_1, PLAY_PAUSE, RECORD, RESET, UNDO, REDO, DRY_LEVEL, PLUGIN_PORT_COUNT};
 
-#define TEMP_BUFFER_SIZE 1024
+#define TEMP_BUFFER_SIZE 8192
 #define NUM_CHANNELS 2
 #define PLUGIN_AUDIO_PORT_COUNT     4
 #define PLUGIN_CONTROL_PORT_COUNT   PLUGIN_PORT_COUNT - PLUGIN_AUDIO_PORT_COUNT
@@ -278,7 +278,12 @@ class SooperLooperPlugin
 {
 public:
     SooperLooperPlugin() {}
-    ~SooperLooperPlugin() {}
+    ~SooperLooperPlugin() {
+        if (pLS) {
+            free(pLS->pSampleBuf);
+            free(pLS);
+        }
+    }
     static LV2_Handle instantiate(const LV2_Descriptor* descriptor, double samplerate, const char* bundle_path, const LV2_Feature* const* features);
     static void activate(LV2_Handle instance);
     static void deactivate(LV2_Handle instance);
@@ -1713,6 +1718,7 @@ LV2_Handle SooperLooperPlugin::instantiate(const LV2_Descriptor* descriptor, dou
     SooperLooper * pLS;
     plugin->started = 0;
     plugin->playing = 0;
+    plugin->recording = 0;
     // important note: using calloc to zero all data
     pLS = (SooperLooper *) calloc(1, sizeof(SooperLooper));
     if (pLS == NULL)

@@ -32,7 +32,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
-#include <lv2.h>
+#include <lv2/core/lv2.h>
 #include <string.h>
 #if defined(__APPLE__) || defined(_WIN32)
 #define MAXLONG (sizeof(long)-1U)
@@ -274,7 +274,12 @@ class SooperLooperPlugin
 {
 public:
     SooperLooperPlugin() {}
-    ~SooperLooperPlugin() {}
+    ~SooperLooperPlugin() {
+        if (pLS) {
+            free(pLS->pSampleBuf);
+            free(pLS);
+        }
+    }
     static LV2_Handle instantiate(const LV2_Descriptor* descriptor, double samplerate, const char* bundle_path, const LV2_Feature* const* features);
     static void activate(LV2_Handle instance);
     static void deactivate(LV2_Handle instance);
@@ -1665,6 +1670,7 @@ LV2_Handle SooperLooperPlugin::instantiate(const LV2_Descriptor* descriptor, dou
     SooperLooper * pLS;
     plugin->started = 0;
     plugin->playing = 0;
+    plugin->recording = 0;
     // important note: using calloc to zero all data
     pLS = (SooperLooper *) calloc(1, sizeof(SooperLooper));
     if (pLS == NULL) 
