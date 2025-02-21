@@ -4,4 +4,4 @@
 <http://moddevices.com/plugins/sooperlooper-2x2>
   a lv2:Plugin;
   lv2:binary <sooperlooper-2x2.so>;
-  rdfs:seeAlso <sooperlooper.ttl>, <modgui.ttl>.
+  rdfs:seeAlso <sooperlooper.ttl>.
