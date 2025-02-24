@@ -35,7 +35,7 @@
 #include <lv2/core/lv2.h>
 #include <string.h>
 #if defined(__APPLE__) || defined(_WIN32)
-#define MAXLONG (sizeof(long)-1U)
+#define MAXLONG LONG_MAX
 #else
 #include <values.h>
 #endif
