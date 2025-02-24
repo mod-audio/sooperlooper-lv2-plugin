@@ -125,4 +125,44 @@ lv2:port [
   lv2:default 1.0;
   lv2:minimum 0.0;
   lv2:maximum 1.0;
+],
+[
+  a lv2:ControlPort, lv2:InputPort;
+  lv2:index 10;
+  lv2:symbol "wetLevel";
+  lv2:name "Wet Level";
+  lv2:default 1.0;
+  lv2:minimum 0.0;
+  lv2:maximum 1.0;
+],
+[
+  a lv2:ControlPort, lv2:OutputPort;
+  lv2:index 11;
+  lv2:symbol "outStatus";
+  lv2:name "Status";
+  lv2:default 0;
+  lv2:minimum 0;
+  lv2:maximum 4;
+  lv2:portProperty lv2:integer;
+],
+[
+  a lv2:ControlPort, lv2:OutputPort;
+  lv2:index 12;
+  lv2:symbol "outLoopPos";
+  lv2:name "Loop Position";
+  lv2:shortName "Loop Pos";
+  lv2:default 0.0;
+  lv2:minimum 0.0;
+  lv2:maximum 24000.0;
+],
+[
+  a lv2:ControlPort, lv2:OutputPort;
+  lv2:index 13;
+  lv2:symbol "outLoopLen";
+  lv2:name "Loop Length";
+  lv2:shortName "Loop Len";
+  lv2:default 0.0;
+  lv2:minimum 0.0;
+  lv2:maximum 24000.0;
 ].
+

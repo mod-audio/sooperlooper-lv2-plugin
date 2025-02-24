@@ -44,7 +44,7 @@
 
 /**********************************************************************************************************************************************************/
 
-enum {IN_0, IN_1, OUT_0, OUT_1, PLAY_PAUSE, RECORD, RESET, UNDO, REDO, DRY_LEVEL, PLUGIN_PORT_COUNT};
+enum {IN_0, IN_1, OUT_0, OUT_1, PLAY_PAUSE, RECORD, RESET, UNDO, REDO, DRY_LEVEL, WET_LEVEL, OUT_STATUS, OUT_LOOP_POS, OUT_LOOP_LEN, PLUGIN_PORT_COUNT};
 
 #define TEMP_BUFFER_SIZE 8192
 #define NUM_CHANNELS 2
@@ -83,16 +83,16 @@ typedef float LADSPA_Data;
 #define STATE_OFF        0
 #define STATE_TRIG_START 1
 #define STATE_RECORD     2
-#define STATE_TRIG_STOP  3
-#define STATE_PLAY       4
-#define STATE_OVERDUB    5
-#define STATE_MULTIPLY   6
-#define STATE_INSERT     7
-#define STATE_REPLACE    8
-#define STATE_DELAY      9
-#define STATE_MUTE       10
-#define STATE_SCRATCH    11
-#define STATE_ONESHOT    12
+#define STATE_PLAY       3
+#define STATE_OVERDUB    4
+// #define STATE_TRIG_STOP  5
+// #define STATE_MULTIPLY   6
+// #define STATE_INSERT     7
+// #define STATE_REPLACE    8
+// #define STATE_DELAY      9
+// #define STATE_MUTE       10
+// #define STATE_SCRATCH    11
+// #define STATE_ONESHOT    12
 
 #define LIMIT_BETWEEN_0_AND_1(x)          \
 (((x) < 0) ? 0 : (((x) > 1) ? 1 : (x)))
@@ -253,8 +253,8 @@ typedef struct {
     LADSPA_Data *pfRedoTapMode;
 
     /* Input audio port data location. */
-    LADSPA_Data * pfInput;
-    LADSPA_Data * pfInput_1;
+    const LADSPA_Data * pfInput;
+    const LADSPA_Data * pfInput_1;
 
     /* Output audio port data location. */
     LADSPA_Data * pfOutput;
@@ -292,18 +292,18 @@ public:
     static void run(LV2_Handle instance, uint32_t n_samples);
     static void cleanup(LV2_Handle instance);
     static const void* extension_data(const char* uri);
-    float *in_0;
-    float *in_1;
+    const float *in_0;
+    const float *in_1;
     float *out_0;
     float *out_1;
-    float *play_pause;
-    float *record;
-    float *reset;
-    float *undo;
-    float *redo;
-    float *dryLevel;
+    const float *play_pause;
+    const float *record;
+    const float *reset;
+    const float *undo;
+    const float *redo;
+    const float *dryLevel;
+    const float *wetLevel;
     SooperLooper *pLS;
-    float dryVolumeCoef;
     int playing;
     int started;
     int recording;
@@ -314,9 +314,11 @@ public:
     float temp_buffer[TEMP_BUFFER_SIZE]; //TODO check when this buffer needs to be cleared
 
     //lowpass variables
-    double a0;
-    double b1;
-    double z1;
+    struct {
+        double a0;
+        double b1;
+        double z1;
+    } lpdry, lpwet;
 };
 
 
@@ -539,7 +541,9 @@ static void fillLoops(SooperLooper *pLS, LoopChunk *mloop, unsigned long lCurrPo
 
 }
 
+#if 0
 static LoopChunk* transitionToNext(SooperLooper *pLS, LoopChunk *loop, int nextstate);
+#endif
 
 static LoopChunk * beginOverdub(SooperLooper *pLS, LoopChunk *loop)
 {
@@ -594,6 +598,7 @@ static LoopChunk * beginOverdub(SooperLooper *pLS, LoopChunk *loop)
     return loop;
 }
 
+#if 0
 static LoopChunk * beginReplace(SooperLooper *pLS, LoopChunk *loop)
 {
     LoopChunk * srcloop;
@@ -688,7 +693,7 @@ static LoopChunk * transitionToNext(SooperLooper *pLS, LoopChunk *loop, int next
 
     return newloop;
 }
-
+#endif
 
 /*****************************************************************************/
 
@@ -698,28 +703,32 @@ void SooperLooperPlugin::run(LV2_Handle instance, uint32_t SampleCount)
     SooperLooperPlugin *plugin;
     plugin = (SooperLooperPlugin *) instance;
 
-    LADSPA_Data * pfInput;
-    LADSPA_Data * pfInput_1;
+    const LADSPA_Data * pfInput;
+    const LADSPA_Data * pfInput_1;
     LADSPA_Data * pfOutput;
     LADSPA_Data * pfOutput_1;
-    LADSPA_Data fWet=1.0, tmpWet;
+    LADSPA_Data fWet, fDry, tmpWet;
     LADSPA_Data fInputSample;
     LADSPA_Data fOutputSample;
 
     LADSPA_Data fRate = 1.0;
+#if 0
     LADSPA_Data fScratchPos = 0.0;
+#endif
     LADSPA_Data fTrigThresh = 0.0;
 
     LADSPA_Data fTapTrig = 0.0;
 
     LADSPA_Data fFeedback = 1.0;
     unsigned int lCurrPos = 0;
+#if 0
     unsigned int lpCurrPos = 0;
     long slCurrPos;
-    double dDummy;
     int firsttime, backfill;
 
     float fPosRatio;
+#endif
+    double dDummy;
 
     SooperLooper * pLS;
     LoopChunk *loop, *srcloop;
@@ -775,10 +784,9 @@ void SooperLooperPlugin::run(LV2_Handle instance, uint32_t SampleCount)
 
     //fRateSwitch = *(pLS->pfRateSwitch);
 
-
+#if 0
     if (pLS->pfScratchPos)
         fScratchPos = LIMIT_BETWEEN_0_AND_1(*(pLS->pfScratchPos));
-
 
     // the rate switch is ON if it is below 1 but not 0
     // rate is 1 if rate switch is off
@@ -791,10 +799,7 @@ void SooperLooperPlugin::run(LV2_Handle instance, uint32_t SampleCount)
 
     if (pLS->pfWet)
         fWet = LIMIT_BETWEEN_0_AND_1(*(pLS->pfWet));
-
-    //if (pLS->pfDry)
-    //    fDry = LIMIT_BETWEEN_0_AND_1(*(pLS->pfDry));
-
+#endif
 
     if (pLS->pfFeedback) {
         fFeedback = LIMIT_BETWEEN_0_AND_1(*(pLS->pfFeedback));
@@ -898,11 +903,18 @@ void SooperLooperPlugin::run(LV2_Handle instance, uint32_t SampleCount)
         plugin->redoSet = false;
     }
 
-    //calculate logarithmic value for dry level
-    float volumeCoef = pow(10.0f, (1 - *plugin->dryLevel) * -45 / 20.0f);
-    if (*plugin->dryLevel == 0.0f) {
-        volumeCoef = 0.0;
+    // calculate logarithmic value for dry and wet level
+    fDry = (*plugin->dryLevel != 0.0f) ? pow(10.0f, (1 - *plugin->dryLevel) * -45 / 20.0f) : 0.f;
+    fWet = (*plugin->wetLevel != 0.0f) ? pow(10.0f, (1 - *plugin->wetLevel) * -45 / 20.0f) : 0.f;
+
+    for (unsigned f = 0; f < SampleCount; f++) {
+        plugin->lpdry.z1 = fDry * plugin->lpdry.a0 + plugin->lpdry.z1 * plugin->lpdry.b1;
+        plugin->lpwet.z1 = fWet * plugin->lpwet.a0 + plugin->lpwet.z1 * plugin->lpwet.b1;
     }
+
+    fDry = plugin->lpdry.z1;
+    fWet = plugin->lpwet.z1;
+
     /* end control reading */
 
     long int s_index = 0;
@@ -958,7 +970,7 @@ void SooperLooperPlugin::run(LV2_Handle instance, uint32_t SampleCount)
                                 }
                             }
 
-                            plugin->temp_buffer[interPolIndex++] = plugin->dryVolumeCoef * fInputSample;
+                            plugin->temp_buffer[interPolIndex++] = fDry * fInputSample;
 
                         }
                     }
@@ -992,7 +1004,7 @@ void SooperLooperPlugin::run(LV2_Handle instance, uint32_t SampleCount)
                             loop->dCurrPos = loop->dCurrPos + fRate;
 
 
-                            plugin->temp_buffer[interPolIndex++] = plugin->dryVolumeCoef * fInputSample;
+                            plugin->temp_buffer[interPolIndex++] = fDry * fInputSample;
                         }
                     }
 
@@ -1005,6 +1017,7 @@ void SooperLooperPlugin::run(LV2_Handle instance, uint32_t SampleCount)
 
                 } break;
 
+#if 0
             case STATE_TRIG_STOP:
                 {
                     //fprintf(stderr,"in trigstop\n");
@@ -1050,7 +1063,7 @@ void SooperLooperPlugin::run(LV2_Handle instance, uint32_t SampleCount)
                                 break;
                             }
 
-                            plugin->temp_buffer[interPolIndex++] = plugin->dryVolumeCoef * fInputSample;
+                            plugin->temp_buffer[interPolIndex++] = fDry * fInputSample;
                         }
                     }
 
@@ -1061,11 +1074,11 @@ void SooperLooperPlugin::run(LV2_Handle instance, uint32_t SampleCount)
                     loop->lCycles = 1;
 
                 } break;
-
+#endif
 
 
             case STATE_OVERDUB:
-            case STATE_REPLACE:
+            // case STATE_REPLACE:
                 {
                     if (loop &&  loop->lLoopLength && loop->srcloop)
                     {
@@ -1082,22 +1095,26 @@ void SooperLooperPlugin::run(LV2_Handle instance, uint32_t SampleCount)
 
                                 fillLoops(pLS, loop, lCurrPos);
 
+#if 0
                                 if (pLS->state == STATE_OVERDUB)
+#endif
                                 {
                                     // use our self as the source (we have been filled by the call above)
                                     fOutputSample = fWet  *  *(loop->pLoopStart + lCurrPos)
-                                        + plugin->dryVolumeCoef * fInputSample;
+                                        + fDry * fInputSample;
 
                                     *(loop->pLoopStart + lCurrPos) =
                                         (fInputSample + 0.95 * fFeedback *  *(loop->pLoopStart + lCurrPos));
                                 }
+#if 0
                                 else {
                                     // state REPLACE use only the new input
                                     // use our self as the source (we have been filled by the call above)
-                                    fOutputSample = plugin->dryVolumeCoef * fInputSample;
+                                    fOutputSample = fDry * fInputSample;
 
                                     *(loop->pLoopStart + lCurrPos) = fInputSample;
                                 }
+#endif
 
                                 plugin->temp_buffer[interPolIndex++] = fOutputSample;
 
@@ -1135,6 +1152,7 @@ void SooperLooperPlugin::run(LV2_Handle instance, uint32_t SampleCount)
                     }
                 } break;
 
+#if 0
             case STATE_MULTIPLY:
                 {
                     if (loop && loop->lLoopLength && loop->srcloop)
@@ -1164,7 +1182,7 @@ void SooperLooperPlugin::run(LV2_Handle instance, uint32_t SampleCount)
                                 // always use the source loop as the source
 
                                 fOutputSample = (fWet *  *(srcloop->pLoopStart + lpCurrPos)
-                                        + plugin->dryVolumeCoef * fInputSample);
+                                        + fDry * fInputSample);
 
 
                                 if (slCurrPos < 0) {
@@ -1263,7 +1281,7 @@ void SooperLooperPlugin::run(LV2_Handle instance, uint32_t SampleCount)
                                 {
                                     // just the source and input
                                     fOutputSample = (fWet *  *(srcloop->pLoopStart + lpCurrPos)
-                                            + plugin->dryVolumeCoef * fInputSample);
+                                            + fDry * fInputSample);
 
                                     // do not include the new input
                                     //*(loop->pLoopStart + lCurrPos)
@@ -1273,14 +1291,14 @@ void SooperLooperPlugin::run(LV2_Handle instance, uint32_t SampleCount)
                                 else if (lCurrPos > loop->lMarkEndL && *pLS->pfRoundMode == 0)
                                 {
                                     // insert zeros, we finishing an insert with nothingness
-                                    fOutputSample = plugin->dryVolumeCoef * fInputSample;
+                                    fOutputSample = fDry * fInputSample;
 
                                     *(loop->pLoopStart + lCurrPos) = 0.0;
 
                                 }
                                 else {
                                     // just the input we are now inserting
-                                    fOutputSample = plugin->dryVolumeCoef * fInputSample;
+                                    fOutputSample = fDry * fInputSample;
 
                                     *(loop->pLoopStart + lCurrPos) = (fInputSample);
 
@@ -1348,13 +1366,12 @@ void SooperLooperPlugin::run(LV2_Handle instance, uint32_t SampleCount)
                     }
 
                 } break;
-
-
+#endif
 
             case STATE_PLAY:
-            case STATE_ONESHOT:
-            case STATE_SCRATCH:
-            case STATE_MUTE:
+            // case STATE_ONESHOT:
+            // case STATE_SCRATCH:
+            // case STATE_MUTE:
                 {
                     //fprintf(stderr,"in play begin\n");
                     // play  the input out mixed with the recorded loop.
@@ -1362,6 +1379,7 @@ void SooperLooperPlugin::run(LV2_Handle instance, uint32_t SampleCount)
                     {
                         tmpWet = fWet;
 
+#if 0
                         if (pLS->state == STATE_MUTE) {
                             if (pLS->lRampSamples <= 0)
                                 tmpWet = 0.0;
@@ -1422,7 +1440,7 @@ void SooperLooperPlugin::run(LV2_Handle instance, uint32_t SampleCount)
                             }
 
                         }
-
+#endif
 
                         srcloop = loop->srcloop;
 
@@ -1449,7 +1467,11 @@ void SooperLooperPlugin::run(LV2_Handle instance, uint32_t SampleCount)
 
                                 // modify fWet if we are in a ramp up/down
                                 if (pLS->lRampSamples > 0) {
-                                    if (pLS->state == STATE_MUTE || pLS->bRampDown == 1) {
+                                    if (
+#if 0
+                                        pLS->state == STATE_MUTE ||
+#endif
+                                        pLS->bRampDown == 1) {
                                         //negative linear ramp
                                         tmpWet = fWet * (pLS->lRampSamples * 1.0) / XFADE_SAMPLES;
                                     }
@@ -1470,7 +1492,7 @@ void SooperLooperPlugin::run(LV2_Handle instance, uint32_t SampleCount)
 
                                 fInputSample = (c == 0) ? pfInput[lSampleIndex] : pfInput_1[lSampleIndex];
                                 fOutputSample =   tmpWet *  *(loop->pLoopStart + lCurrPos)
-                                    + plugin->dryVolumeCoef * fInputSample;
+                                    + fDry * fInputSample;
 
                                 // increment and wrap at the proper loop end
                                 loop->dCurrPos = loop->dCurrPos + fRate;
@@ -1479,6 +1501,7 @@ void SooperLooperPlugin::run(LV2_Handle instance, uint32_t SampleCount)
 
 
                                 if (loop->dCurrPos >= loop->lLoopLength) {
+#if 0
                                     if (pLS->state == STATE_ONESHOT) {
                                         // done with one shot
                                         //DBG(fprintf(stderr, "finished ONESHOT\n"));
@@ -1486,6 +1509,7 @@ void SooperLooperPlugin::run(LV2_Handle instance, uint32_t SampleCount)
                                         pLS->lRampSamples = XFADE_SAMPLES;
                                         //fWet = 0.0;
                                     }
+#endif
 
                                     if (pLS->fNextCurrRate != 0) {
                                         // commit the new rate at boundary (quantized)
@@ -1499,6 +1523,7 @@ void SooperLooperPlugin::run(LV2_Handle instance, uint32_t SampleCount)
                                     // our rate must be negative
                                     // adjust around to the back
                                     loop->dCurrPos += loop->lLoopLength;
+#if 0
                                     if (pLS->state == STATE_ONESHOT) {
                                         // done with one shot
                                         //DBG(fprintf(stderr, "finished ONESHOT neg\n"));
@@ -1506,6 +1531,7 @@ void SooperLooperPlugin::run(LV2_Handle instance, uint32_t SampleCount)
                                         //fWet = 0.0;
                                         pLS->lRampSamples = XFADE_SAMPLES;
                                     }
+#endif
 
                                     if (pLS->fNextCurrRate != 0) {
                                         // commit the new rate at boundary (quantized)
@@ -1528,6 +1554,7 @@ void SooperLooperPlugin::run(LV2_Handle instance, uint32_t SampleCount)
 
                 } break;
 
+#if 0
             case STATE_DELAY:
                 {
                     if (loop && loop->lLoopLength)
@@ -1558,7 +1585,7 @@ void SooperLooperPlugin::run(LV2_Handle instance, uint32_t SampleCount)
 
 
                                 fOutputSample =   fWet *  *(loop->pLoopStart + lCurrPos)
-                                    + plugin->dryVolumeCoef * fInputSample;
+                                    + fDry * fInputSample;
 
 
                                 if (!pLS->bHoldMode) {
@@ -1595,6 +1622,7 @@ void SooperLooperPlugin::run(LV2_Handle instance, uint32_t SampleCount)
                         goto passthrough;
                     }
                 } break;
+#endif
 
             default:
                 {
@@ -1613,8 +1641,8 @@ passthrough:
         for (;lSampleIndex < SampleCount;
                 lSampleIndex++)
         {
-            plugin->temp_buffer[s_index] = plugin->dryVolumeCoef * pfInput[lSampleIndex];
-            plugin->temp_buffer[s_index + 1] = plugin->dryVolumeCoef * pfInput_1[lSampleIndex];
+            plugin->temp_buffer[s_index] = fDry * pfInput[lSampleIndex];
+            plugin->temp_buffer[s_index + 1] = fDry * pfInput_1[lSampleIndex];
             s_index += NUM_CHANNELS;
         }
 
@@ -1662,7 +1690,11 @@ loopend:
         if (pLS->pfCycleLength)
             *pLS->pfCycleLength = 0.0;
 
-        if (pLS->pfStateOut && pLS->state != STATE_MUTE && pLS->state != STATE_TRIG_START)
+        if (pLS->pfStateOut &&
+#if 0
+            pLS->state != STATE_MUTE &&
+#endif
+            pLS->state != STATE_TRIG_START)
             *pLS->pfStateOut = (LADSPA_Data) STATE_OFF;
 
     }
@@ -1670,8 +1702,6 @@ loopend:
     //END_OF_LOOP
     s_index = 0;
     for (unsigned f = 0; f < SampleCount; f++) {
-        plugin->z1 = volumeCoef * plugin->a0 + plugin->z1 * plugin->b1;
-        plugin->dryVolumeCoef = plugin->z1;
         pfOutput[f] = plugin->temp_buffer[s_index];
         pfOutput_1[f] = plugin->temp_buffer[s_index + 1];
         s_index += NUM_CHANNELS;
@@ -1717,37 +1747,37 @@ LV2_Handle SooperLooperPlugin::instantiate(const LV2_Descriptor* descriptor, dou
       return NULL;
     plugin->pLS = pLS;
 
-   pLS->fSampleRate = (LADSPA_Data)SampleRate;
+    pLS->fSampleRate = (LADSPA_Data)SampleRate;
 
-   // we do include the LoopChunk structures in the Buf, so we really
-   // get a little less the SAMPLE_MEMORY seconds
-   pLS->lBufferSize = (unsigned long)((LADSPA_Data)SampleRate * SAMPLE_MEMORY * sizeof(LADSPA_Data));
+    // we do include the LoopChunk structures in the Buf, so we really
+    // get a little less the SAMPLE_MEMORY seconds
+    pLS->lBufferSize = (unsigned long)((LADSPA_Data)SampleRate * SAMPLE_MEMORY * sizeof(LADSPA_Data));
 
-   pLS->pSampleBuf = (char*)calloc(pLS->lBufferSize, 1);
-   if (pLS->pSampleBuf == NULL) {
-      free(pLS);
-      return NULL;
-   }
+    pLS->pSampleBuf = (char*)calloc(pLS->lBufferSize, 1);
+    if (pLS->pSampleBuf == NULL) {
+        free(pLS);
+        return NULL;
+    }
 
-   /* just one for now */
-   //pLS->lLoopStart = 0;
-   //pLS->lLoopStop = 0;
-   //pLS->lCurrPos = 0;
+    /* just one for now */
+    //pLS->lLoopStart = 0;
+    //pLS->lLoopStop = 0;
+    //pLS->lCurrPos = 0;
 
-   pLS->state = STATE_PLAY;
+    pLS->state = STATE_PLAY;
 
-   //DBG(fprintf(stderr,"instantiated\n"));
+    //DBG(fprintf(stderr,"instantiated\n"));
 
-   pLS->pfQuantMode = &pLS->fQuantizeMode;
-   pLS->pfRoundMode = &pLS->fRoundMode;
-   pLS->pfRedoTapMode = &pLS->fRedoTapMode;
+    pLS->pfQuantMode = &pLS->fQuantizeMode;
+    pLS->pfRoundMode = &pLS->fRoundMode;
+    pLS->pfRedoTapMode = &pLS->fRedoTapMode;
 
-   //init lowpass
-    plugin->z1 = 0.0;
+    //init lowpass
+    plugin->lpdry.z1 = 0.0;
     double frequency = 20.0 / SampleRate;
-    plugin->b1 = exp(-2.0 * M_PI * frequency);
-    plugin->a0 = 1.0 - plugin->b1;
-    plugin->dryVolumeCoef = 0.0;
+    plugin->lpdry.b1 = exp(-2.0 * M_PI * frequency);
+    plugin->lpdry.a0 = 1.0 - plugin->lpdry.b1;
+    memcpy(&plugin->lpwet, &plugin->lpdry, sizeof(plugin->lpdry));
 
     for (unsigned i = 0; i < TEMP_BUFFER_SIZE; i++) {
         plugin->temp_buffer[i] = 0.0;
@@ -1810,10 +1840,10 @@ void SooperLooperPlugin::connect_port(LV2_Handle instance, uint32_t port, void *
     switch (port)
     {
     case IN_0:
-        plugin->in_0 = (float*) data;
+        plugin->in_0 = (const float*) data;
         break;
     case IN_1:
-        plugin->in_1 = (float*) data;
+        plugin->in_1 = (const float*) data;
         break;
     case OUT_0:
         plugin->out_0 = (float*) data;
@@ -1822,22 +1852,34 @@ void SooperLooperPlugin::connect_port(LV2_Handle instance, uint32_t port, void *
         plugin->out_1 = (float*) data;
         break;
     case PLAY_PAUSE:
-        plugin->play_pause = (float*) data;
+        plugin->play_pause = (const float*) data;
         break;
     case RECORD:
-        plugin->record = (float*) data;
+        plugin->record = (const float*) data;
         break;
     case RESET:
-        plugin->reset = (float*) data;
+        plugin->reset = (const float*) data;
         break;
     case UNDO:
-        plugin->undo = (float*) data;
+        plugin->undo = (const float*) data;
         break;
     case REDO:
-        plugin->redo = (float*) data;
+        plugin->redo = (const float*) data;
         break;
     case DRY_LEVEL:
-        plugin->dryLevel = (float*)data;
+        plugin->dryLevel = (const float*)data;
+        break;
+    case WET_LEVEL:
+        plugin->wetLevel = (const float*)data;
+        break;
+    case OUT_STATUS:
+        plugin->pLS->pfStateOut = (float*)data;
+        break;
+    case OUT_LOOP_POS:
+        plugin->pLS->pfLoopPos = (float*)data;
+        break;
+    case OUT_LOOP_LEN:
+        plugin->pLS->pfLoopLength = (float*)data;
         break;
     }
 }
