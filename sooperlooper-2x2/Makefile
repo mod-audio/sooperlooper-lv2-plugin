@@ -38,4 +38,4 @@ clean:
 
 install: $(PLUGIN_SO)
 	install -d $(DESTDIR)$(PREFIX)/lib/lv2/$(PLUGIN).lv2/
-	install -m 644 $(PLUGIN_SO) $(DESTDIR)$(PREFIX)/lib/lv2/$(PLUGIN).lv2/
+	install -m 644 $(PLUGIN_SO) src/*.ttl $(DESTDIR)$(PREFIX)/lib/lv2/$(PLUGIN).lv2/
