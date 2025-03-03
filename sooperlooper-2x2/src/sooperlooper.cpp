@@ -832,7 +832,7 @@ void SooperLooperPlugin::run(LV2_Handle instance, uint32_t SampleCount)
         plugin->playing = 1;
         if (!plugin->started) {
             if (plugin->recording) {
-                plugin->pLS->state = STATE_TRIG_START;
+                pLS->state = STATE_TRIG_START;
                 plugin->started = 1;
             }
         } else {
@@ -845,12 +845,13 @@ void SooperLooperPlugin::run(LV2_Handle instance, uint32_t SampleCount)
                         srcloop = NULL;
                 }
             } else {
-                plugin->pLS->state = STATE_PLAY;
+                pLS->state = STATE_PLAY;
             }
         }
     } else if (*(plugin->play_pause) <= 0.0 && plugin->playing) {
-        plugin->pLS->state = STATE_OFF;
+        pLS->state = STATE_OFF;
         plugin->playing = 0;
+        loop->dCurrPos = 0.0;
         //plugin->initNewLoop = false; //TODO does it also needs to be here?
     }
 
@@ -858,8 +859,10 @@ void SooperLooperPlugin::run(LV2_Handle instance, uint32_t SampleCount)
         plugin->recording = 1;
         if (!plugin->started) {
             if (plugin->playing) {
-                plugin->pLS->state = STATE_TRIG_START;
+                pLS->state = STATE_TRIG_START;
                 plugin->started = 1;
+            } else {
+                loop->dCurrPos = 0.0;
             }
         } else {
             if (plugin->playing) {
@@ -875,9 +878,9 @@ void SooperLooperPlugin::run(LV2_Handle instance, uint32_t SampleCount)
     } else if (*(plugin->record) <= 0.0 && plugin->recording) {
         plugin->recording = 0;
         if (plugin->started && plugin->playing)
-            plugin->pLS->state = STATE_PLAY;
+            pLS->state = STATE_PLAY;
         else
-            plugin->pLS->state = STATE_OFF;
+            pLS->state = STATE_OFF;
     }
 
     if (*(plugin->undo) > 0.0 && !plugin->undoSet) {
