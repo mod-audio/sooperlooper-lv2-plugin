@@ -1,9 +1,11 @@
+@prefix atom:   <http://lv2plug.in/ns/ext/atom#> .
 @prefix doap:   <http://usefulinc.com/ns/doap#>.
 @prefix foaf:   <http://xmlns.com/foaf/0.1/>.
 @prefix lv2:    <http://lv2plug.in/ns/lv2core#>.
 @prefix mod:    <http://moddevices.com/ns/mod#>.
 @prefix pprops: <http://lv2plug.in/ns/ext/port-props#>.
 @prefix rdfs:   <http://www.w3.org/2000/01/rdf-schema#>.
+@prefix worker: <http://lv2plug.in/ns/ext/worker#>.
 
 <http://moddevices.com/plugins/sooperlooper-2x2>
 a lv2:Plugin, lv2:UtilityPlugin;
@@ -25,6 +27,9 @@ doap:maintainer [
 
 mod:brand "MOD";
 mod:label "SooperLooper 2x2";
+
+lv2:extensionData worker:interface;
+lv2:requiredFeature worker:schedule;
 
 lv2:minorVersion 0;
 lv2:microVersion 9;
@@ -61,8 +66,15 @@ lv2:port [
   lv2:shortName "Output1";
 ],
 [
-  a lv2:ControlPort, lv2:InputPort;
+  a atom:AtomPort, lv2:OutputPort;
+  atom:bufferType atom:Sequence;
   lv2:index 4;
+  lv2:symbol "notify";
+  lv2:name "Waveform Output";
+],
+[
+  a lv2:ControlPort, lv2:InputPort;
+  lv2:index 5;
   lv2:symbol "play_pause";
   lv2:name "Play/Pause";
   lv2:shortName "Play/Pause";
@@ -73,7 +85,7 @@ lv2:port [
 ],
 [
   a lv2:ControlPort, lv2:InputPort;
-  lv2:index 5;
+  lv2:index 6;
   lv2:symbol "record";
   lv2:name "Record";
   lv2:shortName "Record";
@@ -84,7 +96,7 @@ lv2:port [
 ],
 [
   a lv2:ControlPort, lv2:InputPort;
-  lv2:index 6;
+  lv2:index 7;
   lv2:symbol "reset";
   lv2:name "Reset";
   lv2:shortName "Reset";
@@ -95,7 +107,7 @@ lv2:port [
 ],
 [
   a lv2:ControlPort, lv2:InputPort;
-  lv2:index 7;
+  lv2:index 8;
   lv2:symbol "undo";
   lv2:name "Undo";
   lv2:shortName "Undo";
@@ -106,7 +118,7 @@ lv2:port [
 ],
 [
   a lv2:ControlPort, lv2:InputPort;
-  lv2:index 8;
+  lv2:index 9;
   lv2:symbol "redo";
   lv2:name "Redo";
   lv2:shortName "Redo";
@@ -118,7 +130,7 @@ lv2:port [
 ],
 [
   a lv2:ControlPort, lv2:InputPort;
-  lv2:index 9;
+  lv2:index 10;
   lv2:symbol "dryLevel";
   lv2:name "Dry Level";
   lv2:shortName "Dry Level";
@@ -128,7 +140,7 @@ lv2:port [
 ],
 [
   a lv2:ControlPort, lv2:InputPort;
-  lv2:index 10;
+  lv2:index 11;
   lv2:symbol "wetLevel";
   lv2:name "Wet Level";
   lv2:default 1.0;
@@ -136,8 +148,18 @@ lv2:port [
   lv2:maximum 1.0;
 ],
 [
+  a lv2:ControlPort, lv2:InputPort;
+  lv2:index 12;
+  lv2:symbol "waveform";
+  lv2:name "Enable Waveform";
+  lv2:default 0;
+  lv2:minimum 0;
+  lv2:maximum 1;
+  lv2:portProperty lv2:integer, lv2:toggled, pprops:notOnGUI;
+],
+[
   a lv2:ControlPort, lv2:OutputPort;
-  lv2:index 11;
+  lv2:index 13;
   lv2:symbol "outStatus";
   lv2:name "Status";
   lv2:default 0;
@@ -147,7 +169,7 @@ lv2:port [
 ],
 [
   a lv2:ControlPort, lv2:OutputPort;
-  lv2:index 12;
+  lv2:index 14;
   lv2:symbol "outLoopPos";
   lv2:name "Loop Position";
   lv2:shortName "Loop Pos";
@@ -157,7 +179,7 @@ lv2:port [
 ],
 [
   a lv2:ControlPort, lv2:OutputPort;
-  lv2:index 13;
+  lv2:index 15;
   lv2:symbol "outLoopLen";
   lv2:name "Loop Length";
   lv2:shortName "Loop Len";
@@ -165,4 +187,3 @@ lv2:port [
   lv2:minimum 0.0;
   lv2:maximum 24000.0;
 ].
-

@@ -33,6 +33,14 @@
 #include <string.h>
 #include <math.h>
 #include <lv2/core/lv2.h>
+#include <lv2/core/lv2_util.h>
+#include <lv2/atom/atom.h>
+#include <lv2/atom/forge.h>
+#include <lv2/log/log.h>
+#include <lv2/log/logger.h>
+#include <lv2/patch/patch.h>
+#include <lv2/units/units.h>
+#include <lv2/worker/worker.h>
 #include <string.h>
 #if defined(__APPLE__) || defined(_WIN32)
 #define MAXLONG LONG_MAX
@@ -40,11 +48,14 @@
 #include <values.h>
 #endif
 
+#define STB_IMAGE_RESIZE_IMPLEMENTATION
+#include "../../common/stb_image_resize2.h"
+
 #define PLUGIN_URI "http://moddevices.com/plugins/sooperlooper-2x2"
 
 /**********************************************************************************************************************************************************/
 
-enum {IN_0, IN_1, OUT_0, OUT_1, PLAY_PAUSE, RECORD, RESET, UNDO, REDO, DRY_LEVEL, WET_LEVEL, OUT_STATUS, OUT_LOOP_POS, OUT_LOOP_LEN, PLUGIN_PORT_COUNT};
+enum {IN_0, IN_1, OUT_0, OUT_1, OUT_WAVEFORM, PLAY_PAUSE, RECORD, RESET, UNDO, REDO, DRY_LEVEL, WET_LEVEL, WAVEFORM, OUT_STATUS, OUT_LOOP_POS, OUT_LOOP_LEN, PLUGIN_PORT_COUNT};
 
 #define TEMP_BUFFER_SIZE 8192
 #define NUM_CHANNELS 2
@@ -77,6 +88,10 @@ typedef float LADSPA_Data;
 // happen within at least X samples)
 //#define TRIG_SETTLE  4410
 #define TRIG_SETTLE  2205
+
+#define WAVEFORM_POINTS 328
+#define WAVEFORM_PRECISION_SAMPLES 64
+#define WAVEFORM_PRECISION_SAMPLES_RECORD 16
 
 /*****************************************************************************/
 
@@ -280,6 +295,9 @@ class SooperLooperPlugin
 public:
     SooperLooperPlugin() {}
     ~SooperLooperPlugin() {
+        delete[] peak.data;
+        delete[] peakrec.data;
+
         if (pLS) {
             free(pLS->pSampleBuf);
             free(pLS);
@@ -291,6 +309,12 @@ public:
     static void connect_port(LV2_Handle instance, uint32_t port, void *data);
     static void run(LV2_Handle instance, uint32_t n_samples);
     static void cleanup(LV2_Handle instance);
+    static LV2_Worker_Status worker_work(LV2_Handle instance,
+                                         LV2_Worker_Respond_Function respond,
+                                         LV2_Worker_Respond_Handle handle,
+                                         uint32_t size,
+                                         const void* data);
+    static LV2_Worker_Status worker_response(LV2_Handle instance, uint32_t size, const void* body);
     static const void* extension_data(const char* uri);
     const float *in_0;
     const float *in_1;
@@ -303,6 +327,10 @@ public:
     const float *redo;
     const float *dryLevel;
     const float *wetLevel;
+    const float *waveform;
+    LV2_Atom_Sequence *notify;
+    LV2_Log_Logger logger;
+    LV2_Worker_Schedule* worker;
     SooperLooper *pLS;
     int playing;
     int started;
@@ -312,6 +340,31 @@ public:
     bool redoSet;
     bool initNewLoop;
     float temp_buffer[TEMP_BUFFER_SIZE]; //TODO check when this buffer needs to be cleared
+
+    //waveform details
+    LV2_Atom_Forge forge;
+    LV2_Atom_Forge_Frame forgeFrame;
+    struct {
+        struct {
+            LV2_URID Set;
+            LV2_URID property;
+            LV2_URID value;
+        } patch;
+        LV2_URID frame;
+        LV2_URID waveform;
+    } uris;
+    struct {
+        unsigned count, used, size;
+        float val;
+        float* data;
+    } peak;
+    struct {
+        unsigned count, used, size;
+        float val;
+        float* data;
+    } peakrec;
+    unsigned numSamplesPerPoint;
+    bool sendWaveform;
 
     //lowpass variables
     struct {
@@ -697,6 +750,127 @@ static LoopChunk * transitionToNext(SooperLooper *pLS, LoopChunk *loop, int next
 
 /*****************************************************************************/
 
+static void sendCurrentWaveform(SooperLooperPlugin *plugin)
+{
+    plugin->sendWaveform = false;
+
+    LV2_Atom_Forge_Frame frame;
+    lv2_atom_forge_frame_time(&plugin->forge, 0);
+    lv2_atom_forge_object(&plugin->forge, &frame, 0, plugin->uris.patch.Set);
+
+    lv2_atom_forge_key(&plugin->forge, plugin->uris.patch.property);
+    lv2_atom_forge_urid(&plugin->forge, plugin->uris.waveform);
+
+    lv2_atom_forge_key(&plugin->forge, plugin->uris.patch.value);
+    lv2_atom_forge_vector(&plugin->forge, sizeof(float), plugin->forge.Float, WAVEFORM_POINTS, plugin->peak.data);
+
+    lv2_atom_forge_pop(&plugin->forge, &frame);
+}
+
+static void recreateAndSendCurrentWaveform(SooperLooperPlugin *plugin)
+{
+    if (plugin->numSamplesPerPoint == 0)
+        return;
+
+    LoopChunk *loop = plugin->pLS->headLoopChunk;
+    if (loop->lLoopLength == 0)
+        return;
+
+    float sample, peak = 0.f;
+    float *data = plugin->peak.data;
+
+    for (unsigned int i = 0, index = 0, count = 0; i < loop->lLoopLength; i += NUM_CHANNELS, ++count) {
+        if ((sample = fabsf(*(loop->pLoopStart + i))) > peak) {
+            peak = sample;
+        }
+
+        if (count == plugin->numSamplesPerPoint) {
+            count = 0;
+            data[index++] = peak;
+            peak = 0.f;
+        }
+    }
+
+    plugin->peak.count = 0;
+    plugin->peak.val = 0.f;
+
+    sendCurrentWaveform(plugin);
+}
+
+/*****************************************************************************/
+
+static inline void updatePeakRecord(SooperLooperPlugin *plugin, unsigned int lCurrPos, float sample)
+{
+    if ((sample = fabsf(sample)) > plugin->peak.val)
+        plugin->peak.val = sample;
+
+    if (++plugin->peak.count == WAVEFORM_PRECISION_SAMPLES) {
+        lCurrPos /= WAVEFORM_PRECISION_SAMPLES;
+
+        if (plugin->peak.val > plugin->peakrec.val) {
+            plugin->peakrec.val = plugin->peak.val;
+            plugin->sendWaveform = true;
+        }
+
+        plugin->peak.count = 0;
+        plugin->peak.data[lCurrPos] = plugin->peak.val;
+        plugin->peak.val = 0.f;
+        plugin->peak.used = lCurrPos;
+
+        if (++plugin->peakrec.count == WAVEFORM_PRECISION_SAMPLES_RECORD) {
+            lCurrPos /= WAVEFORM_PRECISION_SAMPLES_RECORD;
+
+            plugin->peakrec.count = 0;
+            plugin->peakrec.data[lCurrPos] = plugin->peakrec.val;
+            plugin->peakrec.val = 0.f;
+            plugin->peakrec.used = lCurrPos;
+
+            if (plugin->sendWaveform)
+            {
+                plugin->sendWaveform = false;
+                const unsigned int offset = lCurrPos > WAVEFORM_POINTS ? lCurrPos - WAVEFORM_POINTS : 0;
+
+                LV2_Atom_Forge_Frame frame;
+                lv2_atom_forge_frame_time(&plugin->forge, 0);
+                lv2_atom_forge_object(&plugin->forge, &frame, 0, plugin->uris.patch.Set);
+
+                lv2_atom_forge_key(&plugin->forge, plugin->uris.patch.property);
+                lv2_atom_forge_urid(&plugin->forge, plugin->uris.waveform);
+
+                lv2_atom_forge_key(&plugin->forge, plugin->uris.patch.value);
+                lv2_atom_forge_vector(&plugin->forge, sizeof(float), plugin->forge.Float, WAVEFORM_POINTS, plugin->peakrec.data + offset);
+
+                lv2_atom_forge_pop(&plugin->forge, &frame);
+            }
+        }
+    }
+}
+
+static inline void updatePeakOverdub(SooperLooperPlugin *plugin, unsigned int lCurrPos, float sample)
+{
+    if (plugin->numSamplesPerPoint == 0)
+        return;
+
+    if ((sample = fabsf(sample)) > plugin->peak.val) {
+        plugin->peak.val = sample;
+        plugin->sendWaveform = true;
+    }
+
+    if (++plugin->peak.count == plugin->numSamplesPerPoint)
+    {
+        lCurrPos /= plugin->numSamplesPerPoint;
+
+        plugin->peak.count = 0;
+        plugin->peak.data[lCurrPos] = plugin->peak.val;
+        plugin->peak.val = 0.f;
+
+        if (plugin->sendWaveform)
+            sendCurrentWaveform(plugin);
+    }
+}
+
+/*****************************************************************************/
+
 /* Run the sampler  for a block of SampleCount samples. */
 void SooperLooperPlugin::run(LV2_Handle instance, uint32_t SampleCount)
 {
@@ -820,6 +994,9 @@ void SooperLooperPlugin::run(LV2_Handle instance, uint32_t SampleCount)
      * LV2 run, reading control ports and setting states
      */
 
+    lv2_atom_forge_set_buffer(&plugin->forge, reinterpret_cast<uint8_t*>(plugin->notify), plugin->notify->atom.size);
+    lv2_atom_forge_sequence_head(&plugin->forge, &plugin->forgeFrame, plugin->uris.frame);
+
     if (*(plugin->reset) > 0.0) {
         clearLoopChunks(pLS);
         plugin->recording = 0;
@@ -849,6 +1026,12 @@ void SooperLooperPlugin::run(LV2_Handle instance, uint32_t SampleCount)
             }
         }
     } else if (*(plugin->play_pause) <= 0.0 && plugin->playing) {
+        if (pLS->state == STATE_RECORD) {
+            // recording just stopped, generate resized waveform
+            plugin->peak.count = 0;
+            plugin->peak.val = 0.f;
+            plugin->worker->schedule_work(plugin->worker->handle, sizeof(loop->lLoopLength), &loop->lLoopLength);
+        }
         pLS->state = STATE_OFF;
         plugin->playing = 0;
         loop->dCurrPos = 0.0;
@@ -861,8 +1044,6 @@ void SooperLooperPlugin::run(LV2_Handle instance, uint32_t SampleCount)
             if (plugin->playing) {
                 pLS->state = STATE_TRIG_START;
                 plugin->started = 1;
-            } else {
-                loop->dCurrPos = 0.0;
             }
         } else {
             if (plugin->playing) {
@@ -877,6 +1058,12 @@ void SooperLooperPlugin::run(LV2_Handle instance, uint32_t SampleCount)
         }
     } else if (*(plugin->record) <= 0.0 && plugin->recording) {
         plugin->recording = 0;
+        if (pLS->state == STATE_RECORD) {
+            // recording just stopped, generate resized waveform
+            plugin->peak.count = 0;
+            plugin->peak.val = 0.f;
+            plugin->worker->schedule_work(plugin->worker->handle, sizeof(loop->lLoopLength), &loop->lLoopLength);
+        }
         if (plugin->started && plugin->playing)
             pLS->state = STATE_PLAY;
         else
@@ -889,6 +1076,8 @@ void SooperLooperPlugin::run(LV2_Handle instance, uint32_t SampleCount)
             if (empty) {
                 plugin->started = 0;
                 plugin->initNewLoop = false;
+            } else {
+                recreateAndSendCurrentWaveform(plugin);
             }
             pLS->state = STATE_PLAY;
         }
@@ -901,6 +1090,7 @@ void SooperLooperPlugin::run(LV2_Handle instance, uint32_t SampleCount)
             redoLoop(pLS);
             pLS->state = STATE_PLAY;
             plugin->redoSet = true;
+            recreateAndSendCurrentWaveform(plugin);
         }
     } else if (*plugin->redo == 0.0 && plugin->redoSet) {
         plugin->redoSet = false;
@@ -919,6 +1109,17 @@ void SooperLooperPlugin::run(LV2_Handle instance, uint32_t SampleCount)
     fWet = plugin->lpwet.z1;
 
     /* end control reading */
+
+    if (plugin->started == 0 && plugin->peak.used != 0) {
+        plugin->peak.count = plugin->peak.used = 0;
+        plugin->peakrec.count = plugin->peakrec.used = 0;
+        plugin->peak.val = plugin->peakrec.val = 0.f;
+        plugin->numSamplesPerPoint = 0;
+        memset(plugin->peak.data, 0, sizeof(float) * plugin->peak.size);
+        memset(plugin->peakrec.data, 0, sizeof(float) * plugin->peakrec.size);
+
+        sendCurrentWaveform(plugin);
+    }
 
     long int s_index = 0;
 
@@ -1002,6 +1203,7 @@ void SooperLooperPlugin::run(LV2_Handle instance, uint32_t SampleCount)
                             fInputSample = (c == 0) ? pfInput[lSampleIndex] : pfInput_1[lSampleIndex];
 
                             *(loop->pLoopStart + lCurrPos) = fInputSample;
+                            if (c == 0) updatePeakRecord(plugin, lCurrPos / NUM_CHANNELS, fInputSample);
 
                             // increment according to current rate
                             loop->dCurrPos = loop->dCurrPos + fRate;
@@ -1106,18 +1308,18 @@ void SooperLooperPlugin::run(LV2_Handle instance, uint32_t SampleCount)
                                     fOutputSample = fWet  *  *(loop->pLoopStart + lCurrPos)
                                         + fDry * fInputSample;
 
-                                    *(loop->pLoopStart + lCurrPos) =
-                                        (fInputSample + 0.95 * fFeedback *  *(loop->pLoopStart + lCurrPos));
+                                    fInputSample = (fInputSample + 0.95 * fFeedback *  *(loop->pLoopStart + lCurrPos));
                                 }
 #if 0
                                 else {
                                     // state REPLACE use only the new input
                                     // use our self as the source (we have been filled by the call above)
                                     fOutputSample = fDry * fInputSample;
-
-                                    *(loop->pLoopStart + lCurrPos) = fInputSample;
                                 }
 #endif
+
+                                *(loop->pLoopStart + lCurrPos) = fInputSample;
+                                if (c == 0) updatePeakOverdub(plugin, lCurrPos / NUM_CHANNELS, fInputSample);
 
                                 plugin->temp_buffer[interPolIndex++] = fOutputSample;
 
@@ -1740,14 +1942,32 @@ LV2_Handle SooperLooperPlugin::instantiate(const LV2_Descriptor* descriptor, dou
 {
     SooperLooperPlugin *plugin = new SooperLooperPlugin();
 
+    LV2_URID_Map* map = nullptr;
+    const char* missing = lv2_features_query(features,
+        LV2_LOG__log,         &plugin->logger.log, false,
+        LV2_URID__map,        &map,                true,
+        LV2_WORKER__schedule, &plugin->worker,     true,
+        nullptr);
+
+    lv2_log_logger_set_map(&plugin->logger, map);
+
+    if (missing != nullptr) {
+        lv2_log_error(&plugin->logger, "Missing feature <%s>\n", missing);
+        delete plugin;
+        return nullptr;
+    }
+
     SooperLooper * pLS;
     plugin->started = 0;
     plugin->playing = 0;
     plugin->recording = 0;
     // important note: using calloc to zero all data
     pLS = (SooperLooper *) calloc(1, sizeof(SooperLooper));
-    if (pLS == NULL)
-      return NULL;
+    if (pLS == nullptr) {
+        lv2_log_error(&plugin->logger, "Out of memory\n");
+        delete plugin;
+        return nullptr;
+    }
     plugin->pLS = pLS;
 
     pLS->fSampleRate = (LADSPA_Data)SampleRate;
@@ -1757,9 +1977,11 @@ LV2_Handle SooperLooperPlugin::instantiate(const LV2_Descriptor* descriptor, dou
     pLS->lBufferSize = (unsigned long)((LADSPA_Data)SampleRate * SAMPLE_MEMORY * sizeof(LADSPA_Data));
 
     pLS->pSampleBuf = (char*)calloc(pLS->lBufferSize, 1);
-    if (pLS->pSampleBuf == NULL) {
+    if (pLS->pSampleBuf == nullptr) {
         free(pLS);
-        return NULL;
+        lv2_log_error(&plugin->logger, "Out of memory\n");
+        delete plugin;
+        return nullptr;
     }
 
     /* just one for now */
@@ -1782,6 +2004,21 @@ LV2_Handle SooperLooperPlugin::instantiate(const LV2_Descriptor* descriptor, dou
     plugin->lpdry.a0 = 1.0 - plugin->lpdry.b1;
     memcpy(&plugin->lpwet, &plugin->lpdry, sizeof(plugin->lpdry));
 
+    //init waveform
+    plugin->peak.size = SampleRate * SAMPLE_MEMORY / WAVEFORM_PRECISION_SAMPLES;
+    plugin->peak.data = new float[plugin->peak.size];
+    plugin->peakrec.size = plugin->peak.size / WAVEFORM_PRECISION_SAMPLES_RECORD;
+    plugin->peakrec.data = new float[plugin->peakrec.size];
+    memset(&plugin->forge, 0, sizeof(plugin->forge));
+    memset(&plugin->forgeFrame, 0, sizeof(plugin->forgeFrame));
+
+    lv2_atom_forge_init(&plugin->forge, map);
+    plugin->uris.patch.Set = map->map(map->handle, LV2_PATCH__Set);
+    plugin->uris.patch.property = map->map(map->handle, LV2_PATCH__property);
+    plugin->uris.patch.value = map->map(map->handle, LV2_PATCH__value);
+    plugin->uris.frame = map->map(map->handle, LV2_UNITS__frame);
+    plugin->uris.waveform = map->map(map->handle, "http://moddevices.com/plugins/sooperlooper#waveform");
+
     for (unsigned i = 0; i < TEMP_BUFFER_SIZE; i++) {
         plugin->temp_buffer[i] = 0.0;
     }
@@ -1798,6 +2035,14 @@ LV2_Handle SooperLooperPlugin::instantiate(const LV2_Descriptor* descriptor, dou
 void SooperLooperPlugin::activate(LV2_Handle instance)
 {
   SooperLooperPlugin *plugin = (SooperLooperPlugin *) instance;
+
+  plugin->peak.count = plugin->peak.used = 0;
+  plugin->peakrec.count = plugin->peakrec.used = 0;
+  plugin->peak.val = plugin->peakrec.val = 0.f;
+  plugin->numSamplesPerPoint = 0;
+  plugin->sendWaveform = false;
+  memset(plugin->peak.data, 0, sizeof(float) * plugin->peak.size);
+  memset(plugin->peakrec.data, 0, sizeof(float) * plugin->peakrec.size);
 
   SooperLooper *pLS = plugin->pLS;
   pLS->lLastMultiCtrl = -1;
@@ -1854,6 +2099,9 @@ void SooperLooperPlugin::connect_port(LV2_Handle instance, uint32_t port, void *
     case OUT_1:
         plugin->out_1 = (float*) data;
         break;
+    case OUT_WAVEFORM:
+        plugin->notify = (LV2_Atom_Sequence*) data;
+        break;
     case PLAY_PAUSE:
         plugin->play_pause = (const float*) data;
         break;
@@ -1875,6 +2123,9 @@ void SooperLooperPlugin::connect_port(LV2_Handle instance, uint32_t port, void *
     case WET_LEVEL:
         plugin->wetLevel = (const float*)data;
         break;
+    case WAVEFORM:
+        plugin->waveform = (const float*)data;
+        break;
     case OUT_STATUS:
         plugin->pLS->pfStateOut = (float*)data;
         break;
@@ -1889,10 +2140,6 @@ void SooperLooperPlugin::connect_port(LV2_Handle instance, uint32_t port, void *
 
 /**********************************************************************************************************************************************************/
 
-
-
-/**********************************************************************************************************************************************************/
-
 void SooperLooperPlugin::cleanup(LV2_Handle instance)
 {
     delete ((SooperLooperPlugin *) instance);
@@ -1900,7 +2147,58 @@ void SooperLooperPlugin::cleanup(LV2_Handle instance)
 
 /**********************************************************************************************************************************************************/
 
+LV2_Worker_Status SooperLooperPlugin::worker_work(LV2_Handle instance,
+                                                  LV2_Worker_Respond_Function respond,
+                                                  LV2_Worker_Respond_Handle handle,
+                                                  uint32_t size,
+                                                  const void* data)
+{
+    SooperLooperPlugin *plugin = (SooperLooperPlugin *) instance;
+
+    // resize captured waveform to fit into WAVEFORM_POINTS
+    if (plugin->peak.used != WAVEFORM_POINTS) {
+        float* resized = stbir_resize_float_linear(plugin->peak.data, 1, plugin->peak.used, sizeof(float),
+                                                   nullptr, 1, WAVEFORM_POINTS, sizeof(float),
+                                                   STBIR_1CHANNEL);
+        if (resized) {
+            memcpy(plugin->peak.data, resized, sizeof(float) * WAVEFORM_POINTS);
+            free(resized);
+        } else {
+            memset(plugin->peak.data, 0, sizeof(float) * WAVEFORM_POINTS);
+        }
+    }
+
+    // this unlocks the overdub waveform update
+    const unsigned long lLoopLength = *(const unsigned long*)data;
+    plugin->numSamplesPerPoint = lLoopLength / WAVEFORM_POINTS;
+
+    // trigger waveform display update
+    char dummy = 1;
+    respond(handle, sizeof(dummy), &dummy);
+
+    return LV2_WORKER_SUCCESS;
+}
+
+/**********************************************************************************************************************************************************/
+
+LV2_Worker_Status SooperLooperPlugin::worker_response(LV2_Handle instance, uint32_t size, const void* body)
+{
+    SooperLooperPlugin *plugin = (SooperLooperPlugin *) instance;
+
+    sendCurrentWaveform(plugin);
+
+    return LV2_WORKER_SUCCESS;
+}
+
+/**********************************************************************************************************************************************************/
+
 const void* SooperLooperPlugin::extension_data(const char* uri)
 {
-    return NULL;
+    if (strcmp(uri, LV2_WORKER__interface) == 0) {
+        static const LV2_Worker_Interface worker = {
+            SooperLooperPlugin::worker_work, SooperLooperPlugin::worker_response, nullptr
+        };
+        return &worker;
+    }
+    return nullptr;
 }
