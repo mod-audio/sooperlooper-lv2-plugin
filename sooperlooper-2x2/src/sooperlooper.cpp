@@ -785,16 +785,21 @@ static void recreateAndSendCurrentWaveform(SooperLooperPlugin *plugin)
     float sample, peak = 0.f;
     unsigned int i = plugin->peakredo.sampleIndex;
 
-    for (unsigned int count = 0; i < loop->lLoopLength; i += NUM_CHANNELS, ++count) {
+    for (unsigned int count = 0, ncount = 0; i < loop->lLoopLength; i += NUM_CHANNELS) {
         fillLoops(plugin->pLS, loop, i);
 
         if ((sample = fabsf(*(loop->pLoopStart + i))) > peak) {
             peak = sample;
         }
 
-        if (count == plugin->numSamplesPerPoint) {
+        if (++count == plugin->numSamplesPerPoint) {
             plugin->peak.data[plugin->peakredo.peakIndex++] = peak;
-            break;
+
+            if (++ncount == 4)
+                break;
+
+            count = 0;
+            peak = 0.f;
         }
     }
 
