@@ -848,11 +848,20 @@ static void handleRecStop(SooperLooperPlugin *plugin)
         sendMainWaveform(plugin);
 
         memset(plugin->peakrec.data, 0, sizeof(float) * WAVEFORM_POINTS);
-        plugin->peakrec.count = 0;
+        plugin->peakrec.count = plugin->peakrec.dubcount = 0;
         plugin->peakrec.val = 0.f;
         plugin->sendWaveformRec = false;
         sendRecordWaveform(plugin);
     }
+}
+
+static void handleOverdubUndo(SooperLooperPlugin *plugin)
+{
+    memset(plugin->peakrec.data, 0, sizeof(float) * WAVEFORM_POINTS);
+    plugin->peakrec.count = plugin->peakrec.dubcount = 0;
+    plugin->peakrec.val = 0.f;
+    plugin->sendWaveformRec = false;
+    sendRecordWaveform(plugin);
 }
 
 /*****************************************************************************/
@@ -1113,6 +1122,7 @@ void SooperLooperPlugin::run(LV2_Handle instance, uint32_t SampleCount)
     }
 
     if (*(plugin->undo) > 0.0 && !plugin->undoSet) {
+        plugin->undoSet = true;
         if(loop) {
             int empty = undoLoop(pLS);
             if (empty) {
@@ -1123,18 +1133,22 @@ void SooperLooperPlugin::run(LV2_Handle instance, uint32_t SampleCount)
                 plugin->playing = 0;
                 plugin->started = 0;
                 plugin->initNewLoop = false;
+            } else if (pLS->state == STATE_OVERDUB) {
+                // stop overdub on undo
+                handleOverdubUndo(plugin);
+                plugin->recording = 0;
             } else {
                 recreateAndSendMainWaveform(plugin);
             }
         }
     } else if (*plugin->undo == 0.0 && plugin->undoSet) {
-            plugin->undoSet = false;
+        plugin->undoSet = false;
     }
 
     if (*(plugin->redo) > 0.0 && !plugin->redoSet) {
-        if(loop) {
+        plugin->redoSet = true;
+        if(loop && !plugin->recording) {
             redoLoop(pLS);
-            plugin->redoSet = true;
             recreateAndSendMainWaveform(plugin);
         }
     } else if (*plugin->redo == 0.0 && plugin->redoSet) {
