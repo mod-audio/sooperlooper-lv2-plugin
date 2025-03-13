@@ -48,9 +48,6 @@
 #include <values.h>
 #endif
 
-#define STB_IMAGE_RESIZE_IMPLEMENTATION
-#include "../../common/stb_image_resize2.h"
-
 #define PLUGIN_URI "http://moddevices.com/plugins/sooperlooper"
 
 /**********************************************************************************************************************************************************/
