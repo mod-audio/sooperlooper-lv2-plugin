@@ -1035,6 +1035,7 @@ void SooperLooperPlugin::run(LV2_Handle instance, uint32_t SampleCount)
 
     if (*(plugin->reset) > 0.0) {
         clearLoopChunks(pLS);
+        pLS->state = STATE_OFF;
         plugin->recording = 0;
         plugin->playing = 0;
         plugin->started = 0;
@@ -1100,6 +1101,11 @@ void SooperLooperPlugin::run(LV2_Handle instance, uint32_t SampleCount)
         if(loop) {
             int empty = undoLoop(pLS);
             if (empty) {
+                // same as reset
+                clearLoopChunks(pLS);
+                pLS->state = STATE_OFF;
+                plugin->recording = 0;
+                plugin->playing = 0;
                 plugin->started = 0;
                 plugin->initNewLoop = false;
             } else {
