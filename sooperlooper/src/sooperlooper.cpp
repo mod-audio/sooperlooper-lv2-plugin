@@ -838,8 +838,7 @@ static void handleRecStop(SooperLooperPlugin *plugin)
     } else {
         // overdub just stopped, merge to main waveform and clear rec one
         for (unsigned int i = 0; i < WAVEFORM_POINTS; ++i) {
-            if (plugin->peakrec.data[i] != 0.f)
-                plugin->peak.data[i] = plugin->peakrec.data[i];
+            plugin->peak.data[i] = fmaxf(plugin->peak.data[i], plugin->peakrec.data[i]);
         }
         sendMainWaveform(plugin);
 
@@ -877,7 +876,6 @@ static inline void updateRecordPeak(SooperLooperPlugin *plugin, unsigned int lCu
             plugin->peakrec.count = 0;
             plugin->peakrec.data[lCurrPos] = plugin->peakrec.val;
             plugin->peakrec.val = 0.f;
-            plugin->peakrec.used = lCurrPos;
 
             if (plugin->sendWaveformRec)
             {
@@ -905,7 +903,7 @@ static inline void updateOverdubPeak(SooperLooperPlugin *plugin, unsigned int lC
         lCurrPos /= plugin->numSamplesPerPoint;
 
         plugin->peakrec.count = 0;
-        plugin->peakrec.data[lCurrPos] = plugin->peakrec.val;
+        plugin->peakrec.data[lCurrPos] = fmaxf(plugin->peakrec.data[lCurrPos], plugin->peakrec.val);
         plugin->peakrec.val = 0.f;
 
         if (plugin->sendWaveformRec)
@@ -1148,7 +1146,7 @@ void SooperLooperPlugin::run(LV2_Handle instance, uint32_t SampleCount)
 
     if (plugin->started == 0 && plugin->peak.used != 0) {
         plugin->peak.count = plugin->peak.used = 0;
-        plugin->peakrec.count = plugin->peakrec.used = 0;
+        plugin->peakrec.count = 0;
         plugin->peakredo.sampleIndex = plugin->peakredo.peakIndex = 0;
         plugin->peak.val = plugin->peakrec.val = 0.f;
         plugin->numSamplesPerPoint = 0;
@@ -1332,6 +1330,7 @@ void SooperLooperPlugin::run(LV2_Handle instance, uint32_t SampleCount)
                                 lCurrPos =(unsigned int) fmod(loop->dCurrPos, loop->lLoopLength);
 
                                 fInputSample = pfInput[lSampleIndex];
+                                updateOverdubPeak(plugin, lCurrPos, fInputSample);
 
                                 fillLoops(pLS, loop, lCurrPos);
 
@@ -1354,7 +1353,6 @@ void SooperLooperPlugin::run(LV2_Handle instance, uint32_t SampleCount)
 #endif
 
                                 *(loop->pLoopStart + lCurrPos) = fInputSample;
-                                updateOverdubPeak(plugin, lCurrPos, fInputSample);
 
                                 pfOutput[lSampleIndex] = fOutputSample;
 
@@ -2059,7 +2057,7 @@ void SooperLooperPlugin::activate(LV2_Handle instance)
   SooperLooperPlugin *plugin = (SooperLooperPlugin *) instance;
 
   plugin->peak.count = plugin->peak.used = 0;
-  plugin->peakrec.count = plugin->peakrec.used = 0;
+  plugin->peakrec.count = 0;
   plugin->peakredo.sampleIndex = plugin->peakredo.peakIndex = 0;
   plugin->peak.val = plugin->peakrec.val = 0.f;
   plugin->numSamplesPerPoint = 0;
@@ -2174,15 +2172,24 @@ LV2_Worker_Status SooperLooperPlugin::worker_work(LV2_Handle instance,
 
     // resize captured waveform to fit into WAVEFORM_POINTS
     if (plugin->peak.used != WAVEFORM_POINTS) {
-        float* resized = stbir_resize_float_linear(plugin->peak.data, 1, plugin->peak.used, sizeof(float),
-                                                   nullptr, 1, WAVEFORM_POINTS, sizeof(float),
-                                                   STBIR_1CHANNEL);
-        if (resized) {
-            memcpy(plugin->peak.data, resized, sizeof(float) * WAVEFORM_POINTS);
-            free(resized);
-        } else {
-            memset(plugin->peak.data, 0, sizeof(float) * WAVEFORM_POINTS);
+        const double ratio = (double)plugin->peak.used / WAVEFORM_POINTS;
+        float* resized = new float[WAVEFORM_POINTS];
+        float peak = 0.f;
+        for (unsigned int i = 0; i < WAVEFORM_POINTS; ++i)
+        {
+            double imap = (double)i * ratio;
+            unsigned low = floor(imap);
+            unsigned high = ceil(imap);
+            for (unsigned j = low; j <= high; ++j)
+            {
+                if (plugin->peak.data[j] > peak)
+                    peak = plugin->peak.data[j];
+            }
+            resized[i] = peak;
+            peak = 0.f;
         }
+        memcpy(plugin->peak.data, resized, sizeof(float) * WAVEFORM_POINTS);
+        delete[] resized;
     }
 
     // this unlocks the overdub waveform update
@@ -2211,6 +2218,8 @@ LV2_Worker_Status SooperLooperPlugin::worker_response(LV2_Handle instance, uint3
     plugin->peakrec.val = 0.f;
     plugin->sendWaveformRec = false;
     sendRecordWaveform(plugin);
+
+    plugin->peakredo.sampleIndex = plugin->peakredo.peakIndex = 0;
 
     return LV2_WORKER_SUCCESS;
 }
