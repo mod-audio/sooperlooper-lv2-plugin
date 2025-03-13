@@ -88,6 +88,7 @@ typedef float LADSPA_Data;
 #define WAVEFORM_POINTS 328
 #define WAVEFORM_PRECISION_SAMPLES 64
 #define WAVEFORM_PRECISION_SAMPLES_RECORD 16
+#define WAVEFORM_QUIET_SAMPLE 0.0008f
 
 /*****************************************************************************/
 
@@ -797,7 +798,7 @@ static void recreateAndSendMainWaveform(SooperLooperPlugin *plugin)
         fillLoops(plugin->pLS, loop, i);
 
         if ((sample = fabsf(*(loop->pLoopStart + i))) > peak) {
-            peak = sample;
+            peak = fmaxf(sample, WAVEFORM_QUIET_SAMPLE);
         }
 
         if (++count == plugin->numSamplesPerPoint) {
@@ -852,7 +853,7 @@ static void handleRecStop(SooperLooperPlugin *plugin)
 static inline void updateRecordPeak(SooperLooperPlugin *plugin, unsigned int lCurrPos, float sample)
 {
     if ((sample = fabsf(sample)) > plugin->peak.val)
-        plugin->peak.val = sample;
+        plugin->peak.val = fmaxf(sample, WAVEFORM_QUIET_SAMPLE);
 
     if (++plugin->peak.count == WAVEFORM_PRECISION_SAMPLES) {
         lCurrPos /= WAVEFORM_PRECISION_SAMPLES;
@@ -891,7 +892,7 @@ static inline void updateOverdubPeak(SooperLooperPlugin *plugin, unsigned int lC
         return;
 
     if ((sample = fabsf(sample)) > plugin->peakrec.val) {
-        plugin->peakrec.val = sample;
+        plugin->peakrec.val = fmaxf(sample, WAVEFORM_QUIET_SAMPLE);
         plugin->sendWaveformRec = true;
     }
 
