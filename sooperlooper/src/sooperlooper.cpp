@@ -469,7 +469,11 @@ int undoLoop(SooperLooper *pLS)
     LoopChunk *prevloop;
 
     prevloop = loop->prev;
-    if (prevloop && prevloop == loop->srcloop) {
+    if (prevloop == NULL) {
+        // do not remove last undo
+        return 1;
+
+    } else if (prevloop == loop->srcloop) {
         // if the previous was the source of the one we're undoing
         // pass the dCurrPos along, otherwise leave it be.
         prevloop->dCurrPos = fmod(loop->dCurrPos+loop->lStartAdj, prevloop->lLoopLength);
@@ -1113,13 +1117,14 @@ void SooperLooperPlugin::run(LV2_Handle instance, uint32_t SampleCount)
         if(loop) {
             int empty = undoLoop(pLS);
             if (empty) {
-                // same as reset
-                clearLoopChunks(pLS);
-                pLS->state = STATE_OFF;
-                plugin->recording = 0;
-                plugin->playing = 0;
-                plugin->started = 0;
-                plugin->initNewLoop = false;
+                // do nothing
+                // but for same as reset:
+                // clearLoopChunks(pLS);
+                // pLS->state = STATE_OFF;
+                // plugin->recording = 0;
+                // plugin->playing = 0;
+                // plugin->started = 0;
+                // plugin->initNewLoop = false;
             } else if (pLS->state == STATE_OVERDUB) {
                 // stop overdub on undo
                 handleOverdubUndo(plugin);
