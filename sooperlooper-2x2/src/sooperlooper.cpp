@@ -407,7 +407,7 @@ static LoopChunk * pushNewLoopChunk(SooperLooper* pLS, unsigned long initLength)
         // the stop will be filled in later
 
         // we are the new head
-        pLS->headLoopChunk = loop;
+        pLS->headLoopChunk = pLS->tailLoopChunk = loop;
 
     }
     else {
