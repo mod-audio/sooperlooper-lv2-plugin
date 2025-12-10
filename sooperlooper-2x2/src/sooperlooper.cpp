@@ -54,7 +54,7 @@
 
 enum {IN_0, IN_1, OUT_0, OUT_1, OUT_WAVEFORM, PLAY_PAUSE, RECORD, RESET, UNDO, REDO, DRY_LEVEL, WET_LEVEL, WAVEFORM, OUT_STATUS, OUT_LOOP_POS, OUT_LOOP_LEN, PLUGIN_PORT_COUNT};
 
-#define TEMP_BUFFER_SIZE 8192
+#define TEMP_BUFFER_SIZE 8192 * 2
 #define NUM_CHANNELS 2
 #define PLUGIN_AUDIO_PORT_COUNT     4
 #define PLUGIN_CONTROL_PORT_COUNT   PLUGIN_PORT_COUNT - PLUGIN_AUDIO_PORT_COUNT
@@ -338,7 +338,7 @@ public:
     bool redoSet;
     bool waveformSet;
     bool initNewLoop;
-    float temp_buffer[TEMP_BUFFER_SIZE]; //TODO check when this buffer needs to be cleared
+    float temp_buffer[TEMP_BUFFER_SIZE * NUM_CHANNELS]; //TODO check when this buffer needs to be cleared
 
     //waveform details
     LV2_Atom_Forge forge;
@@ -2099,9 +2099,7 @@ LV2_Handle SooperLooperPlugin::instantiate(const LV2_Descriptor* descriptor, dou
     plugin->uris.waveform = map->map(map->handle, "http://moddevices.com/plugins/sooperlooper#waveform");
     plugin->uris.waveform_rec = map->map(map->handle, "http://moddevices.com/plugins/sooperlooper#waveform-rec");
 
-    for (unsigned i = 0; i < TEMP_BUFFER_SIZE; i++) {
-        plugin->temp_buffer[i] = 0.0;
-    }
+    memset(plugin->temp_buffer, 0, sizeof(plugin->temp_buffer));
 
     plugin->undoSet = false;
     plugin->redoSet = false;
